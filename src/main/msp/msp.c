@@ -157,6 +157,11 @@
 #include "msp.h"
 
 
+/// This is for test, until I figure out how persistent memory works. Better to store it in ram.
+uint8_t rectangle_x;
+uint8_t rectangle_y;
+
+
 static const char * const flightControllerIdentifier = FC_FIRMWARE_IDENTIFIER; // 4 UPPER CASE alpha numeric characters that identify the flight controller.
 
 enum {
@@ -4059,7 +4064,9 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
     {
         uint8_t x = sbufReadU8(src);
         uint8_t y = sbufReadU8(src);
-        osdElementConfigMutable()->item_pos[OSD_CUSTOM_RECTANGLE] = OSD_POS((x), (y)) | OSD_PROFILE_1_FLAG;
+        rectangle_x = x;
+        rectangle_y = y;
+        //osdElementConfigMutable()->item_pos[OSD_CUSTOM_RECTANGLE] = OSD_POS((x), (y)) | OSD_PROFILE_1_FLAG;
 
         break;
     }

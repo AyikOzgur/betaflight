@@ -111,6 +111,10 @@
 
 #include "platform.h"
 
+/// Mine
+extern uint8_t rectangle_x;
+extern uint8_t rectangle_y;
+
 #ifdef USE_OSD
 
 #include "blackbox/blackbox.h"
@@ -666,8 +670,8 @@ static void osdElementCustomRectangle(osdElementParms_t *element)
     // keep track of which middle row we’re on
     static uint8_t middleRow = 1;
 
-    const uint8_t xpos   = element->elemPosX;
-    const uint8_t ypos   = element->elemPosY;
+    const uint8_t xpos   = rectangle_x;// element->elemPosX;
+    const uint8_t ypos   = rectangle_y;// element->elemPosY;
     const uint8_t width  = 3;  // 3 columns
     const uint8_t height = 3;  // 3 rows
 
