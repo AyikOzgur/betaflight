@@ -55,6 +55,10 @@
 
 #pragma once
 
+/// @remark Custom msp command attempts.
+#define MSP_SET_RECTANGLE_POS    190
+
+
 /* Protocol numbers used both by the wire format, config system, and
    field setters.
 */

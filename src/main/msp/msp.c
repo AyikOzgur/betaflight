@@ -4055,6 +4055,14 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
         break;
 #endif
 
+    case MSP_SET_RECTANGLE_POS:
+    {
+        uint8_t x = sbufReadU8(src);
+        uint8_t y = sbufReadU8(src);
+        osdElementConfigMutable()->item_pos[OSD_CUSTOM_RECTANGLE] = OSD_POS((x), (y)) | OSD_PROFILE_1_FLAG;
+
+        break;
+    }
     default:
         // we do not know how to handle the (valid) message, indicate error MSP $M!
         return MSP_RESULT_ERROR;
