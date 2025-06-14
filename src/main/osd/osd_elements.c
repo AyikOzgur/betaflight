@@ -659,6 +659,71 @@ char osdGetTemperatureSymbolForSelectedUnit(void)
 // Element drawing functions
 // *************************
 
+static void osdElementCustomRectangle(osdElementParms_t *element)
+{
+    // three-phase state (top border → sides → bottom border)
+    static enum { TOP, MIDDLE, BOTTOM } renderPhase = TOP;
+    // keep track of which middle row we’re on
+    static uint8_t middleRow = 1;
+
+    const uint8_t xpos   = element->elemPosX;
+    const uint8_t ypos   = element->elemPosY;
+    const uint8_t width  = 3;  // 3 columns
+    const uint8_t height = 3;  // 3 rows
+
+    // tell the core loop we’re not done until phase BOTTOM
+    if (renderPhase != BOTTOM) {
+        element->rendered = false;
+    }
+
+    if (renderPhase == MIDDLE) {
+        // draw the two vertical sides on the single middle row
+        osdDisplayWriteChar(element,
+            xpos,
+            ypos + middleRow,
+            DISPLAYPORT_SEVERITY_NORMAL,
+            SYM_STICK_OVERLAY_VERTICAL);
+        osdDisplayWriteChar(element,
+            xpos + width - 1,
+            ypos + middleRow,
+            DISPLAYPORT_SEVERITY_NORMAL,
+            SYM_STICK_OVERLAY_VERTICAL);
+
+        // advance to BOTTOM on next call
+        if (++middleRow == height) {
+            middleRow   = 1;
+            renderPhase = BOTTOM;
+        }
+
+    } else {
+        // build a 3-char top/bottom border: corner + horizontal + corner
+        element->buff[0] = SYM_STICK_OVERLAY_CENTER;
+        element->buff[1] = SYM_STICK_OVERLAY_HORIZONTAL;
+        element->buff[2] = SYM_STICK_OVERLAY_CENTER;
+        element->buff[3] = '\0';
+
+        if (renderPhase == TOP) {
+            // top border
+            osdDisplayWrite(element,
+                xpos, ypos,
+                DISPLAYPORT_SEVERITY_NORMAL,
+                element->buff);
+            renderPhase = MIDDLE;
+
+        } else { // BOTTOM
+            // bottom border 2 rows down
+            osdDisplayWrite(element,
+                xpos, ypos + height - 1,
+                DISPLAYPORT_SEVERITY_NORMAL,
+                element->buff);
+            renderPhase = TOP;
+        }
+    }
+
+    // skip your normal draw() pass—background has done all the work
+    element->drawElement = false;
+}
+
 #ifdef USE_OSD_ADJUSTMENTS
 static void osdElementAdjustmentRange(osdElementParms_t *element)
 {
@@ -1869,6 +1934,7 @@ static const uint8_t osdElementDisplayOrder[] = {
     OSD_SYS_VTX_TEMP,
     OSD_SYS_FAN_SPEED,
 #endif
+    OSD_CUSTOM_RECTANGLE,
 };
 
 // Define the mapping between the OSD element id and the function to draw it
@@ -2008,6 +2074,7 @@ const osdElementDrawFn osdElementDrawFunction[OSD_ITEM_COUNT] = {
     [OSD_SYS_VTX_TEMP]            = osdElementSys,
     [OSD_SYS_FAN_SPEED]           = osdElementSys,
 #endif
+    [OSD_CUSTOM_RECTANGLE]        =  osdElementCustomRectangle,
 };
 
 // Define the mapping between the OSD element id and the function to draw its background (static part)
