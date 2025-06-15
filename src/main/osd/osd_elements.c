@@ -114,6 +114,8 @@
 /// Mine
 extern uint8_t rectangle_x;
 extern uint8_t rectangle_y;
+extern uint8_t rectangle_width;
+extern uint8_t rectangle_height;
 
 #ifdef USE_OSD
 
@@ -663,68 +665,83 @@ char osdGetTemperatureSymbolForSelectedUnit(void)
 // Element drawing functions
 // *************************
 
-static void osdElementCustomRectangle(osdElementParms_t *element)
+void osdElementCustomRectangle(osdElementParms_t *element)
 {
-    // three-phase state (top border → sides → bottom border)
+    // three-phase state + previous size
     static enum { TOP, MIDDLE, BOTTOM } renderPhase = TOP;
-    // keep track of which middle row we’re on
     static uint8_t middleRow = 1;
+    static uint8_t prevW = 0, prevH = 0;
 
-    const uint8_t xpos   = rectangle_x;// element->elemPosX;
-    const uint8_t ypos   = rectangle_y;// element->elemPosY;
-    const uint8_t width  = 3;  // 3 columns
-    const uint8_t height = 3;  // 3 rows
+    // your existing locals (you just change these two as needed)
+    const uint8_t xpos   = rectangle_x;
+    const uint8_t ypos   = rectangle_y;
+    const uint8_t width  = rectangle_width;
+    const uint8_t height = rectangle_height;
+    
+    // if size changed, restart drawing
+    if (width != prevW || height != prevH) {
+        renderPhase = TOP;
+        middleRow   = 1;
+        prevW       = width;
+        prevH       = height;
+    }
 
-    // tell the core loop we’re not done until phase BOTTOM
+    // not done until we hit BOTTOM
     if (renderPhase != BOTTOM) {
         element->rendered = false;
     }
 
-    if (renderPhase == MIDDLE) {
-        // draw the two vertical sides on the single middle row
-        osdDisplayWriteChar(element,
-            xpos,
-            ypos + middleRow,
-            DISPLAYPORT_SEVERITY_NORMAL,
-            SYM_STICK_OVERLAY_VERTICAL);
-        osdDisplayWriteChar(element,
-            xpos + width - 1,
-            ypos + middleRow,
-            DISPLAYPORT_SEVERITY_NORMAL,
-            SYM_STICK_OVERLAY_VERTICAL);
+    if (renderPhase == TOP) {
+        // top border: corner + horiz*(width-2) + corner
+        for (uint8_t x = 0; x < width; x++) {
+            char c = (x == 0 || x == width-1)
+                   ? SYM_STICK_OVERLAY_CENTER
+                   : SYM_STICK_OVERLAY_HORIZONTAL;
+            osdDisplayWriteChar(element,
+                                xpos + x,
+                                ypos,
+                                DISPLAYPORT_SEVERITY_NORMAL,
+                                c);
+        }
+        // go straight to bottom if height==2
+        renderPhase = (height > 2 ? MIDDLE : BOTTOM);
 
-        // advance to BOTTOM on next call
-        if (++middleRow == height) {
+    } else if (renderPhase == MIDDLE) {
+        // two vertical bars on this middle row
+        osdDisplayWriteChar(element,
+                            xpos,
+                            ypos + middleRow,
+                            DISPLAYPORT_SEVERITY_NORMAL,
+                            SYM_STICK_OVERLAY_VERTICAL);
+        osdDisplayWriteChar(element,
+                            xpos + width - 1,
+                            ypos + middleRow,
+                            DISPLAYPORT_SEVERITY_NORMAL,
+                            SYM_STICK_OVERLAY_VERTICAL);
+
+        // advance or finish middle rows
+        if (++middleRow >= height - 1) {
             middleRow   = 1;
             renderPhase = BOTTOM;
         }
 
-    } else {
-        // build a 3-char top/bottom border: corner + horizontal + corner
-        element->buff[0] = SYM_STICK_OVERLAY_CENTER;
-        element->buff[1] = SYM_STICK_OVERLAY_HORIZONTAL;
-        element->buff[2] = SYM_STICK_OVERLAY_CENTER;
-        element->buff[3] = '\0';
-
-        if (renderPhase == TOP) {
-            // top border
-            osdDisplayWrite(element,
-                xpos, ypos,
-                DISPLAYPORT_SEVERITY_NORMAL,
-                element->buff);
-            renderPhase = MIDDLE;
-
-        } else { // BOTTOM
-            // bottom border 2 rows down
-            osdDisplayWrite(element,
-                xpos, ypos + height - 1,
-                DISPLAYPORT_SEVERITY_NORMAL,
-                element->buff);
-            renderPhase = TOP;
+    } else { // BOTTOM
+        // bottom border
+        for (uint8_t x = 0; x < width; x++) {
+            char c = (x == 0 || x == width-1)
+                   ? SYM_STICK_OVERLAY_CENTER
+                   : SYM_STICK_OVERLAY_HORIZONTAL;
+            osdDisplayWriteChar(element,
+                                xpos + x,
+                                ypos + height - 1,
+                                DISPLAYPORT_SEVERITY_NORMAL,
+                                c);
         }
+        // reset for next rectangle
+        renderPhase = TOP;
     }
 
-    // skip your normal draw() pass—background has done all the work
+    // background did the work—skip the normal draw pass
     element->drawElement = false;
 }
 
