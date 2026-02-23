@@ -157,7 +157,10 @@
 #include "msp.h"
 
 
-/// This is for test, until I figure out how persistent memory works. Better to store it in ram.
+/// Rectangle position in sub-grid units:
+///   x in quarter-character units (4 sub-positions per character column)
+///   y in third-character units (3 sub-positions per character row)
+///   width/height also in sub-grid units
 uint8_t rectangle_x;
 uint8_t rectangle_y;
 uint8_t rectangle_width;
@@ -4067,7 +4070,14 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
         rectangle_y = sbufReadU8(src);
         rectangle_width = sbufReadU8(src);
         rectangle_height = sbufReadU8(src);
-        //osdElementConfigMutable()->item_pos[OSD_CUSTOM_RECTANGLE] = OSD_POS((x), (y)) | OSD_PROFILE_1_FLAG;
+        // Enable the element on OSD profile 1 so VISIBLE() passes.
+        // Position bits don't matter for this element (it uses absolute sub-grid coords),
+        // but the profile flag is required for the draw loop to include it.
+        osdElementConfigMutable()->item_pos[OSD_CUSTOM_RECTANGLE] =
+            OSD_POS(0, 0) | OSD_PROFILE_1_FLAG;
+        // Rebuild the active-elements list so the newly-visible element
+        // is picked up by the draw loop.
+        osdAnalyzeActiveElements();
         break;
     }
     default:

@@ -768,6 +768,11 @@ bool max7456WriteNvm(uint8_t char_address, const uint8_t *font_data)
 
     while ((spiReadRegMsk(dev, MAX7456ADD_STAT) & STAT_NVR_BUSY) != 0x00);
 
+    // Re-enable display after NVM write so normal rendering can resume.
+    // Without this, fontIsLoading stays true and max7456DrawScreen() never runs.
+    fontIsLoading = false;
+    spiWriteReg(dev, MAX7456ADD_VM0, videoSignalReg);
+
     return true;
 }
 

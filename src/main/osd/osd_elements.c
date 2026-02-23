@@ -140,6 +140,7 @@ extern uint8_t rectangle_height;
 
 #include "drivers/display.h"
 #include "drivers/dshot.h"
+#include "drivers/osd.h"
 #include "drivers/osd_symbols.h"
 #include "drivers/time.h"
 #include "drivers/vtx_common.h"
@@ -665,83 +666,159 @@ char osdGetTemperatureSymbolForSelectedUnit(void)
 // Element drawing functions
 // *************************
 
+// Upload custom font characters for sub-grid rectangle edges.
+// Writes 7 characters to OSD font NVM: 4 vertical line variants + 3 horizontal line variants.
+// Each character is 12x18 pixels, 2 bits/pixel (MAX7456 format).
+// Lines are 2px white with 1px black outline for visibility on any background.
+// Returns the number of characters remaining to upload (0 when done).
+// Each call uploads one character to spread NVM write time across multiple OSD frames.
+
+// Helper: set a single pixel in a character row
+static void chrSetPixel(uint8_t *rowData, int col, uint8_t color)
+{
+    if (col < 0 || col >= OSD_CHAR_WIDTH) return;
+    const int byteIdx  = col / 4;
+    const int bitShift = 6 - (col % 4) * 2;
+    rowData[byteIdx] &= ~(0x03 << bitShift);
+    rowData[byteIdx] |=  (color << bitShift);
+}
+
+static int osdUploadRectFontChar(displayPort_t *dp, int charIndex)
+{
+    osdCharacter_t chr;
+    const int totalChars = RECT_H_SUBDIVS + RECT_V_SUBDIVS; // 4 + 3 = 7
+
+    if (charIndex >= totalChars) {
+        return 0;
+    }
+
+    if (charIndex < RECT_H_SUBDIVS) {
+        // Vertical line: 2px white core + 1px black outline on each side = 4px total
+        const int sub = charIndex;
+        memset(chr.data, 0, sizeof(chr.data));
+        const int pixelCol = sub * 3;
+
+        for (int row = 0; row < OSD_CHAR_HEIGHT; row++) {
+            uint8_t *r = &chr.data[row * 3];
+            // Fill transparent
+            r[0] = 0x55; r[1] = 0x55; r[2] = 0x55;
+            // Black outline left
+            chrSetPixel(r, pixelCol - 1, OSD_CHARACTER_COLOR_BLACK);
+            // White core (2px)
+            chrSetPixel(r, pixelCol,     OSD_CHARACTER_COLOR_WHITE);
+            chrSetPixel(r, pixelCol + 1, OSD_CHARACTER_COLOR_WHITE);
+            // Black outline right
+            chrSetPixel(r, pixelCol + 2, OSD_CHARACTER_COLOR_BLACK);
+        }
+        displayWriteFontCharacter(dp, SYM_RECT_VLINE_0 + sub, &chr);
+    } else {
+        // Horizontal line: 2px white core + 1px black outline top/bottom = 4px total
+        const int sub = charIndex - RECT_H_SUBDIVS;
+        memset(chr.data, 0, sizeof(chr.data));
+        const int pixelRow = sub * 6;
+
+        for (int row = 0; row < OSD_CHAR_HEIGHT; row++) {
+            uint8_t *r = &chr.data[row * 3];
+            if (row == pixelRow - 1 || row == pixelRow + 2) {
+                // Black outline row (full width)
+                r[0] = 0x00; r[1] = 0x00; r[2] = 0x00;
+            } else if (row >= pixelRow && row < pixelRow + 2) {
+                // White core row (full width)
+                r[0] = 0xAA; r[1] = 0xAA; r[2] = 0xAA;
+            } else {
+                // Transparent
+                r[0] = 0x55; r[1] = 0x55; r[2] = 0x55;
+            }
+        }
+        displayWriteFontCharacter(dp, SYM_RECT_HLINE_0 + sub, &chr);
+    }
+
+    return totalChars - charIndex - 1;
+}
+
+// Draw a rectangle with sub-grid precision.
+//
+// Coordinates are in sub-character units:
+//   Horizontal: 4 sub-units per character cell (RECT_H_SUBDIVS), ~3px each
+//   Vertical:   3 sub-units per character cell (RECT_V_SUBDIVS), ~6px each
+//
+// This gives ~4x horizontal and ~3x vertical precision over grid-only positioning.
+// Corners are not specially handled — horizontal edges take priority at corner cells.
+//
+// Example: NTSC 30-col display → 120 horizontal sub-positions, 39-48 vertical sub-positions.
+//
+// Font upload is spread across frames (one char per call, 7 total) to avoid blocking.
+// Once fonts are ready, the entire rectangle is drawn in a single call since
+// osdDisplayWriteChar only writes to a memory buffer — no SPI blocking.
 void osdElementCustomRectangle(osdElementParms_t *element)
 {
-    // three-phase state + previous size
-    static enum { TOP, MIDDLE, BOTTOM } renderPhase = TOP;
-    static uint8_t middleRow = 1;
-    static uint8_t prevW = 0, prevH = 0;
+    static bool fontsReady = false;
+    static int fontCharIndex = 0;
 
-    // your existing locals (you just change these two as needed)
-    const uint8_t xpos   = rectangle_x;
-    const uint8_t ypos   = rectangle_y;
-    const uint8_t width  = rectangle_width;
-    const uint8_t height = rectangle_height;
-    
-    // if size changed, restart drawing
-    if (width != prevW || height != prevH) {
-        renderPhase = TOP;
-        middleRow   = 1;
-        prevW       = width;
-        prevH       = height;
+    // Sub-grid coordinates from MSP
+    const uint8_t sub_x = rectangle_x;
+    const uint8_t sub_y = rectangle_y;
+    const uint8_t sub_w = rectangle_width;
+    const uint8_t sub_h = rectangle_height;
+
+    // Nothing to draw
+    if (sub_w == 0 || sub_h == 0) {
+        element->drawElement = false;
+        return;
     }
 
-    // not done until we hit BOTTOM
-    if (renderPhase != BOTTOM) {
+    // Upload custom font characters one per frame to avoid blocking NVM writes
+    if (!fontsReady) {
+        int remaining = osdUploadRectFontChar(element->osdDisplayPort, fontCharIndex);
+        fontCharIndex++;
+        if (remaining == 0) {
+            fontsReady = true;
+        }
+        element->drawElement = false;
         element->rendered = false;
+        return;
     }
 
-    if (renderPhase == TOP) {
-        // top border: corner + horiz*(width-2) + corner
-        for (uint8_t x = 0; x < width; x++) {
-            char c = (x == 0 || x == width-1)
-                   ? SYM_STICK_OVERLAY_CENTER
-                   : SYM_STICK_OVERLAY_HORIZONTAL;
-            osdDisplayWriteChar(element,
-                                xpos + x,
-                                ypos,
-                                DISPLAYPORT_SEVERITY_NORMAL,
-                                c);
-        }
-        // go straight to bottom if height==2
-        renderPhase = (height > 2 ? MIDDLE : BOTTOM);
+    // Convert sub-grid coordinates to grid cell + sub-offset.
+    const uint8_t left_col   = sub_x / RECT_H_SUBDIVS;
+    const uint8_t left_sub   = sub_x % RECT_H_SUBDIVS;
+    const uint8_t right_col  = (sub_x + sub_w - 1) / RECT_H_SUBDIVS;
+    const uint8_t right_sub  = (sub_x + sub_w - 1) % RECT_H_SUBDIVS;
+    const uint8_t top_row    = sub_y / RECT_V_SUBDIVS;
+    const uint8_t top_sub    = sub_y % RECT_V_SUBDIVS;
+    const uint8_t bottom_row = (sub_y + sub_h - 1) / RECT_V_SUBDIVS;
+    const uint8_t bottom_sub = (sub_y + sub_h - 1) % RECT_V_SUBDIVS;
 
-    } else if (renderPhase == MIDDLE) {
-        // two vertical bars on this middle row
-        osdDisplayWriteChar(element,
-                            xpos,
-                            ypos + middleRow,
-                            DISPLAYPORT_SEVERITY_NORMAL,
-                            SYM_STICK_OVERLAY_VERTICAL);
-        osdDisplayWriteChar(element,
-                            xpos + width - 1,
-                            ypos + middleRow,
-                            DISPLAYPORT_SEVERITY_NORMAL,
-                            SYM_STICK_OVERLAY_VERTICAL);
+    // --- Draw entire rectangle in one call ---
+    // These are all memory-buffer writes; the actual SPI transfer
+    // happens later in max7456DrawScreen, so no blocking here.
 
-        // advance or finish middle rows
-        if (++middleRow >= height - 1) {
-            middleRow   = 1;
-            renderPhase = BOTTOM;
-        }
-
-    } else { // BOTTOM
-        // bottom border
-        for (uint8_t x = 0; x < width; x++) {
-            char c = (x == 0 || x == width-1)
-                   ? SYM_STICK_OVERLAY_CENTER
-                   : SYM_STICK_OVERLAY_HORIZONTAL;
-            osdDisplayWriteChar(element,
-                                xpos + x,
-                                ypos + height - 1,
-                                DISPLAYPORT_SEVERITY_NORMAL,
-                                c);
-        }
-        // reset for next rectangle
-        renderPhase = TOP;
+    // Top horizontal edge (inset by 1 column on each side to leave corners empty)
+    const char topChar = SYM_RECT_HLINE_0 + top_sub;
+    for (uint8_t col = left_col + 1; col < right_col; col++) {
+        osdDisplayWriteChar(element, col, top_row,
+                            DISPLAYPORT_SEVERITY_NORMAL, topChar);
     }
 
-    // background did the work—skip the normal draw pass
+    // Left and right vertical edges (inset by 1 row on each side to leave corners empty)
+    for (uint8_t row = top_row + 1; row < bottom_row; row++) {
+        osdDisplayWriteChar(element, left_col, row,
+                            DISPLAYPORT_SEVERITY_NORMAL,
+                            SYM_RECT_VLINE_0 + left_sub);
+        osdDisplayWriteChar(element, right_col, row,
+                            DISPLAYPORT_SEVERITY_NORMAL,
+                            SYM_RECT_VLINE_0 + right_sub);
+    }
+
+    // Bottom horizontal edge (inset by 1 column on each side to leave corners empty)
+    if (bottom_row != top_row) {
+        const char botChar = SYM_RECT_HLINE_0 + bottom_sub;
+        for (uint8_t col = left_col + 1; col < right_col; col++) {
+            osdDisplayWriteChar(element, col, bottom_row,
+                                DISPLAYPORT_SEVERITY_NORMAL, botChar);
+        }
+    }
+
     element->drawElement = false;
 }
 

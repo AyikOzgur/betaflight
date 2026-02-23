@@ -161,6 +161,20 @@
 #define SYM_STICK_OVERLAY_VERTICAL    0x16
 #define SYM_STICK_OVERLAY_HORIZONTAL  0x17
 
+// Rectangle sub-grid precision characters
+// Vertical lines at different horizontal pixel offsets within 12px-wide cell
+#define SYM_RECT_VLINE_0            0xA0  // vertical line at pixel column 0
+#define SYM_RECT_VLINE_1            0xA1  // vertical line at pixel column 3
+#define SYM_RECT_VLINE_2            0xA2  // vertical line at pixel column 6
+#define SYM_RECT_VLINE_3            0xA3  // vertical line at pixel column 9
+// Horizontal lines at different vertical pixel offsets within 18px-tall cell
+#define SYM_RECT_HLINE_0            0xA4  // horizontal line at pixel row 0
+#define SYM_RECT_HLINE_1            0xA5  // horizontal line at pixel row 6
+#define SYM_RECT_HLINE_2            0xA6  // horizontal line at pixel row 12
+// Number of subdivisions per character cell
+#define RECT_H_SUBDIVS              4     // horizontal sub-positions per character
+#define RECT_V_SUBDIVS              3     // vertical sub-positions per character
+
 // GPS degree/minute/second symbols
 #define SYM_GPS_DEGREE              SYM_STICK_OVERLAY_SPRITE_HIGH  // kind of looks like the degree symbol
 #define SYM_GPS_MINUTE              0x27 // '
